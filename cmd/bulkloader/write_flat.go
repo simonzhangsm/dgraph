@@ -105,10 +105,9 @@ func readFlatFile(dir string, fid int, postingCh chan<- *protos.FlatPosting) {
 }
 
 func shuffleFlatFiles(dir string, postingChs []chan *protos.FlatPosting) {
-	fileNum := 0
+	var fileNum int
 	var wg sync.WaitGroup
-
-	// TODO: Don't split posting keys over file boundaries.
+	var prevKey []byte
 
 	var ph postingHeap
 	for _, ch := range postingChs {
@@ -128,7 +127,7 @@ func shuffleFlatFiles(dir string, postingChs []chan *protos.FlatPosting) {
 
 		x.Check(buf.EncodeMessage(msg))
 
-		if len(buf.Bytes()) > 32<<20 {
+		if len(buf.Bytes()) > 32<<20 && bytes.Compare(prevKey, msg.Key) != 0 {
 			filename := filepath.Join(dir, fmt.Sprintf("merged_%6d.bin", fileNum))
 			fileNum++
 			wg.Add(1)
@@ -138,6 +137,7 @@ func shuffleFlatFiles(dir string, postingChs []chan *protos.FlatPosting) {
 			}(buf.Bytes())
 			buf.SetBuf(nil)
 		}
+		prevKey = msg.Key
 	}
 	wg.Wait()
 }

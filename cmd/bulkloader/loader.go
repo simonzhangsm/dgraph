@@ -5,7 +5,6 @@ import (
 	"compress/gzip"
 	"io/ioutil"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 
@@ -114,7 +113,7 @@ func (ld *loader) run() {
 		flatPostingChs[i] = make(chan *protos.FlatPosting, 1<<10)
 		go readFlatFile(tmpPostingsDir, i, flatPostingChs[i])
 	}
-	shuffleFlatFiles(filepath.Join(tmpPostingsDir, "merged.bin"), flatPostingChs)
+	shuffleFlatFiles(tmpPostingsDir, flatPostingChs)
 
 	ld.prog.endSummary()
 }

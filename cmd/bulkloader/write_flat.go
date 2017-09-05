@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
@@ -73,7 +74,7 @@ func sortAndWrite(filename string, postings []*protos.FlatPosting, prog *progres
 func readFlatFile(dir string, fid int, postingCh chan<- *protos.FlatPosting) {
 	filename := filepath.Join(dir, fmt.Sprintf("%06d.bin", fid))
 	fd, err := os.Open(filename)
-	x.Checkf(err, "Could not open flat file.")
+	x.Check(err)
 	defer fd.Close()
 	r := bufio.NewReaderSize(fd, 1<<20)
 
@@ -84,7 +85,7 @@ func readFlatFile(dir string, fid int, postingCh chan<- *protos.FlatPosting) {
 			break
 		}
 		x.Check(err)
-		sz, n := binary.Varint(buf)
+		sz, n := binary.Uvarint(buf)
 		if n <= 0 {
 			log.Fatal("Could not read varint: %d", n)
 		}
@@ -103,13 +104,11 @@ func readFlatFile(dir string, fid int, postingCh chan<- *protos.FlatPosting) {
 	close(postingCh)
 }
 
-func shuffleFlatFiles(filename string, postingChs []chan *protos.FlatPosting) {
-	fd, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE, 0644)
-	x.Check(err)
-	defer func() {
-		x.Check(fd.Sync())
-		x.Check(fd.Close())
-	}()
+func shuffleFlatFiles(dir string, postingChs []chan *protos.FlatPosting) {
+	fileNum := 0
+	var wg sync.WaitGroup
+
+	// TODO: Don't split posting keys over file boundaries.
 
 	var ph postingHeap
 	for _, ch := range postingChs {
@@ -126,15 +125,21 @@ func shuffleFlatFiles(filename string, postingChs []chan *protos.FlatPosting) {
 		} else {
 			heap.Pop(&ph)
 		}
-		x.Check(buf.EncodeMessage(msg))
-		if len(buf.Bytes()) > 32<<20 {
-			x.Check2(fd.Write(buf.Bytes()))
-			buf.Reset()
-		}
 
-		// TODO: Write to multiple files.
-		// TODO: Don't split posting keys over file boundaries.
+		x.Check(buf.EncodeMessage(msg))
+
+		if len(buf.Bytes()) > 32<<20 {
+			filename := filepath.Join(dir, fmt.Sprintf("merged_%6d.bin", fileNum))
+			fileNum++
+			wg.Add(1)
+			go func(buf []byte) {
+				ioutil.WriteFile(filename, buf, 0644)
+				wg.Done()
+			}(buf.Bytes())
+			buf.SetBuf(nil)
+		}
 	}
+	wg.Wait()
 }
 
 type heapNode struct {

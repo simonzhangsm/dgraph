@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"io/ioutil"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -62,8 +63,9 @@ func (a *loader) run() {
 	tmpPostingsDir, err := ioutil.TempDir(a.opt.tmpDir, "bulkloader_tmp_posting_")
 	x.Check(err)
 	defer func() { x.Check(os.RemoveAll(tmpPostingsDir)) }()
+	var numFlatFiles int
 	go func() {
-		writePostings(tmpPostingsDir, a.postingsCh, a.prog)
+		numFlatFiles = writePostings(tmpPostingsDir, a.postingsCh, a.prog)
 		postingWriterWg.Done()
 	}()
 
@@ -99,5 +101,13 @@ func (a *loader) run() {
 	mapperWg.Wait()
 	close(a.postingsCh)
 	postingWriterWg.Wait()
+
+	flatPostingChs := make([]chan *protos.FlatPosting, numFlatFiles)
+	for i := 0; i < numFlatFiles; i++ {
+		flatPostingChs[i] = make(chan *protos.FlatPosting, 1<<10)
+		go readFlatFile(tmpPostingsDir, i, flatPostingChs[i])
+	}
+	shuffleFlatFiles(filepath.Join(tmpPostingsDir, "merged.bin"), flatPostingChs)
+
 	a.prog.endSummary()
 }
